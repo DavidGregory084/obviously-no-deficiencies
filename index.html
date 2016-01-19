@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="utf-8">
+
+    <title>Obviously No Deficiencies</title>
+
+    <meta name="description" content="A presentation about writing library code in functional programming languages">
+    <meta name="author" content="David Gregory">
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+
+    <link rel="stylesheet" href="css/reveal.css">
+    <link rel="stylesheet" href="css/theme/serif.css" id="theme">
+
+    <!-- Code syntax highlighting -->
+    <link rel="stylesheet" href="lib/css/zenburn.css">
+
+    <!-- Printing and PDF exports -->
+    <script>
+      var link = document.createElement( 'link' );
+      link.rel = 'stylesheet';
+      link.type = 'text/css';
+      link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+      document.getElementsByTagName( 'head' )[0].appendChild( link );
+    </script>
+
+    <!--[if lt IE 9]>
+    <script src="lib/js/html5shiv.js"></script>
+    <![endif]-->
+  </head>
+
+  <body>
+
+    <div class="reveal">
+
+      <!-- Any section element inside of this container is displayed as a slide -->
+      <div class="slides">
+        <section data-markdown>
+          <script type="text/template">
+            ## Obviously No Deficiencies
+            A journey to less surprising APIs with functional programming
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Some background about me
+
+            * David Gregory
+            * Software developer for ~2.5 years
+            * Financial services sector
+            * No CS background
+            * Became sold on FP after trying to use Java for the first time
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Overview
+            This will be an introductory talk but it will cover
+            a lot of ground.
+
+            We're going to talk about how to move from an imperative, callback-based API
+            to a functional API that makes use of more elegant methods of composing effects.
+
+            We'll also try and remove some of the noise that generally accompanies code in service-oriented architectures.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### For your reference
+
+            The slides and all of the code are available on GitHub:
+
+            [www.github.com/DavidGregory084/ond](http://www.github.com/DavidGregory084/ond)
+
+            Let's get started!
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### *"I love surprises!"*
+
+            \- No programmer ever
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### The Principle of Least Surprise
+
+            Arguably the most important principle of software development
+            when writing code in a collaborative environment
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### The Premise
+
+            We have inherited responsibility for an in-flight project after another
+            disastrous outbreak of project management.
+
+            ```scala
+            case class Thing(id: String)
+            ```
+
+            The goal of the project is to write a service that can retrieve,
+            search and save information about the client's very important `Thing`s. Thrilling.
+          </script>
+        </section>
+
+
+        <section data-markdown>
+          <script type="text/template">
+            ### DISCLAIMER: Somewhat simplified
+
+            ![Doge](./Doge.jpg)
+          </script>
+        </section>
+        <section data-markdown>
+          <script type="text/template">
+            ### A typical imperative API
+
+            Like Node.js, Vert.x, countless others...
+            ```scala
+            trait CallbackService {
+              def openSession(username: String, password: String, handler: Long => Unit): Unit
+              def searchThings(sessionId: Long, searchTerm: String, handler: List[Thing] => Unit): Unit
+              def getAThing(sessionId: Long, thingId: String, handler: Thing => Unit): Unit
+              def saveAThing(sessionId: Long, thing: Thing, handler: () => Unit): Unit
+              def closeSession(sessionId: Long): Unit
+            }
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Accountability
+
+            Returning `Unit` from a `get` method is definitely a bad sign.
+
+            In functional programming it's an indication that we have stepped outside of
+            the world of pure, idempotent, easily tested functions into a sea
+            of IO, state and Lovecraftian cosmic horror.
+
+            Here we do so because (I am pretending that) there is some underlying asynchronous
+            process which performs our effects and calls our continuation with the result.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Reference Implementations
+
+            Let's use these examples to determine the cost of our refactorings later.
+            ```scala
+            def openSession(username: String, password: String, handler: Long => Unit): Unit = {
+              // new Thread(new Runnable { override def ru- yeah, this is why I gave up on Java
+              val newSession = System.nanoTime
+              sessions += newSession
+              handler(newSession)
+            }
+
+            def searchThings(sessionId: Long, searchTerm: String, handler: List[Thing] => Unit): Unit = {
+              val relevantThings = database.filter { thing =>
+                thing.id.toUpperCase.contains(searchTerm.toUpperCase)
+              }
+              handler(relevantThings.toList)
+            }
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### User code
+            Please note - Scala's anonymous function syntax makes this look nicer
+            than it deserves to look.
+
+            ```scala
+            val callbackService = new HappyCallbackService(initialData)
+            import callbackService._
+
+            openSession("david", "fpnortheast", sid => {
+              searchThings(sid, "ble", things => {
+                closeSession(sid)
+                things shouldBe List(Thing("indispensible"), Thing("irreplaceable"))
+              })
+            })
+            ```
+            You don't want to see what it looks like when we introduce an additional callback on each operation to handle errors.
+            Or write it in vanilla JavaScript.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Whacky control flow, nested callbacks...
+
+            ![Callbacks](./Callbacks.jpg)
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Flattening nested computations
+
+            Here we are carrying around some state with us; in this case the results that we give to our callbacks.
+
+            How can we thread this data through our computation without writing horribly nested code?
+
+            Can we restore a more readable sequential flow of control?
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Context
+
+            To start with, we'll write our code in terms of some type which expresses what the computation is doing.
+
+            If possible, we should use a generic type to ensure that we can express the result type of our operations.
+
+            Sorry Clojurians and Rubyists: the overall technique is not exclusive to statically typed languages at all but it's much easier to explain this way.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### A `Try`-based API
+
+            ```scala
+            trait Try[+A]
+            case class Success[A](value: A) extends Try[A]
+            case class Failure(exc: Throwable) extends Try[Nothing]
+
+            trait TryService {
+              def openSession(username: String, password: String): Try[Long]
+              def searchThings(sessionId: Long, searchTerm: String): Try[List[Thing]]
+              def getAThing(sessionId: Long, thingId: String): Try[Thing]
+              def saveAThing(sessionId: Long, thing: Thing): Try[Unit]
+              def closeSession(sessionId: Long): Try[Unit]
+            }
+            ```
+            Notice how the callbacks are gone. Instead of accepting a callback which requires our result we return a `Try` parameterised by the result type.
+          </script>
+        </section>
+
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Implementations
+
+            This is really a case of spot the difference; there's very little to change.
+            ```scala
+            def openSession(username: String, password: String) = Try {
+              val newSession = System.nanoTime
+              sessions += newSession
+              newSession
+            }
+
+            def searchThings(sessionId: Long, searchTerm: String) = Try {
+              database.filter { thing =>
+                thing.id.toUpperCase.contains(searchTerm.toUpperCase)
+              }.toList
+            }
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Smashing containers together
+
+            Calling `openSession` with our credentials now returns a `Try[Long]`; this encodes the idea
+            of an operation that might fail with an exception.
+
+            It seems like we need to match on the result to find out whether it was successful or not.
+
+            What use is that when we only need a session ID `Long` to perform any of our operations? Aren't we meant to be reducing the complexity of our code?
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Composition with `Try[_]`
+
+            ```scala
+            def flatMap[A](f: A => Try[B]): Try[B]
+            ```
+
+            `Try` offers a higher-order function `flatMap`, which behaves as follows:
+
+            If our `Try[A]` is a `Success[A]`, `flatMap` applies `f` to the `A` that was
+            produced.
+
+            If our `Try[A]` is a `Failure[A]`, this function does nothing.
+
+            This means we can follow our `Try` with another operation,
+            as long as the final result is still a `Try`.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Failing Fast
+
+            In service-oriented architectures, we generally only care whether an entire
+            operation succeeds or fails.
+
+            After the operation returns we serialize the result and return it to the
+            consumer of our API regardless of the outcome.
+
+            The `flatMap` function stops at the first error and returns `Failure` for
+            all succeeding operations.
+
+            This makes it ideal for sequencing effects which might fail.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Monads
+
+            From our narrow software developer's point of view, `Try` is a monad.
+
+            ![Monads](./Monad.jpg)
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### A crash course in monads
+
+            Let's ignore the general atmosphere of confusion that surrounds this word.
+
+            A monad is just some type `F[_]` which computes zero or more results of type `A` - an `F[A]`.
+
+            The `F[_]` that we choose for our `F[A]` determines how to produce an `A` and how to apply operations to its contents:
+
+            There are three basic operations which a monadic type must support.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### `pure`, also known as `return` or `point`
+
+            `def pure[A](a: A): F[A]`
+
+            This operation puts an `A` into the computation. This is sometimes called "lifting" `A` into our computation in `F[_]`.
+
+            Outside of library code we would usually use a constructor directly instead as we usually know our `F[_]` in advance.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### `map`, also known as `fmap` or `<$>`
+
+            `def map[A](f: A => B): F[B]`
+
+            This operation modifies the `A` inside the computation using the function `f` to return a new computation that computes zero or more `B`.
+
+            ```scala
+            scala> Option(1) map { _ + 1 }
+            res0: Option[Int] = Some(2)
+
+            scala> List(1, 2) map { _ + 1 }
+            res1: List[Int] = List(2, 3)
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### `flatMap`, also known as `>>=` or `bind`
+
+            `def flatMap[A](f: A => F[B]): F[B]`
+
+            This operation continues the computation `F[A]` with a new computation `F[B]`, which may be derived from the result `A` of `F[A]`.
+
+            ```scala
+            scala> Option(2) flatMap { i => Option(i * 2) }
+            res3: Option[Int] = Some(4)
+
+            scala> List(2, 4) flatMap { i => List(i * i, i * i * i) }
+            res5: List[Int] = List(4, 8, 16, 64)
+
+            scala> Option.empty[Int] flatMap { i => Option(i * 2) }
+            res6: Option[Int] = None
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Disclaimer:
+
+            This is an extremely informal definition and we will not discuss the associated laws, or the relationship of each operation to
+            other constructs.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Example: `Option[_]`, also known as `Maybe`
+
+            An `Option[A]` may be `Some[A]` or `None`. Therefore, it produces at most one `A`, and applies the function given to `map` only if it is `Some[A]`, in other words if there is an `A` to update.
+
+            Likewise it continues the computation with `flatMap` only if the initial computation produced `Some[A]`.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Optional optional values
+
+            ```scala
+            val smsNotificationNumber: Option[TelephoneNumber] =
+              order.account flatMap { account => account.telephoneNumber }
+            ```
+            This type allows us to deal with multiple layers of optional values: for example, users might have the option to enter their mobile phone number on an optional account registration step when placing orders on an eCommerce site.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Example: `List[_]`
+
+            By contrast, a `List[A]` may produce many `A` or none at all, and applies the function given to `map` to each value that it contains to produce a `List[B]`.
+
+            It continues the computation with `flatMap` by producing a new `List[B]` from each `A` and joining them all together to produce a final `List[B]`.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### A pattern
+
+            There is a pattern emerging: monadic code allows us to express the idea of computation as a series of steps, each of which depends on the result of the
+            previous step.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Back to our API
+            ```scala
+            val trySearch =
+              openSession("david", "fpnortheast") flatMap { sid =>
+                searchThings(sid, "ble") flatMap { things =>
+                  closeSession(sid) map (_ => things)
+                }
+              }
+            ```
+            This does not immediately look like an improvement. We've generalised the idea of the callback that continued the program using the function `flatMap`. The code otherwise looks the same.
+
+            Crucially though, we are now returning a value that carries a lot more information about the execution of our program.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Syntactic sugar to the rescue
+
+            ```scala
+            val trySearch =
+              openSession("david", "fpnortheast") flatMap { sid =>
+                searchThings(sid, "ble") flatMap { things =>
+                  closeSession(sid) map (_ => things)
+                }
+              }
+
+            val trySearch = for {
+              sid <- openSession("david", "fpnortheast")
+              things <- searchThings(sid, "ble")
+              _ <- closeSession(sid)
+            } yield things
+            ```
+            Haskell's `do` / Scala's `for` offer a way of writing code that would usually introduce nesting in a more familiar way.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### User code
+
+            ```scala
+            val tryService = new HappyTryService(initialData)
+            import tryService._
+
+            val trySearch = for {
+              sid <- openSession("david", "fpnortheast")
+              things <- searchThings(sid, "ble")
+              _ <- closeSession(sid)
+            } yield things
+
+            trySearch match {
+              case Success(things) =>
+                things shouldBe List(Thing("indispensible"), Thing("irreplaceable"))
+              case Failure(exc) =>
+                fail(s"Couldn't search things due to $exc")
+            }
+            ```
+            We can handle errors just once at the end of our service's execution - much less traumatic.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Problems
+
+            This is synchronous code. We usually use callbacks to deal with some underlying asychrony so we have lost something here.
+
+            It's still noisy. Only one line from our comprehension is doing useful work; the rest is resource management.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### `Future`-based API
+
+            ```scala
+
+            trait FutureService {
+              def openSession(username: String, password: String)(implicit ec: ExecutionContext): Future[Long]
+              def searchThings(sessionId: Long, searchTerm: String)(implicit ec: ExecutionContext): Future[List[Thing]]
+              def getAThing(sessionId: Long, thingId: String)(implicit ec: ExecutionContext): Future[Thing]
+              def saveAThing(sessionId: Long, thing: Thing)(implicit ec: ExecutionContext): Future[Unit]
+              def closeSession(sessionId: Long)(implicit ec: ExecutionContext): Future[Unit]
+            }
+            ```
+          </script>
+        </section>
+
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Implementations
+
+            ```scala
+            def openSession(username: String, password: String)(implicit ec: ExecutionContext) =
+              Future {
+                val newSession = UUID.randomUUID.getLeastSignificantBits
+                sessions += newSession
+                newSession
+              }
+
+            def searchThings(sessionId: Long, searchTerm: String)(implicit ec: ExecutionContext) =
+              Future {
+                database.filter { thing =>
+                  thing.id.toUpperCase.contains(searchTerm.toUpperCase)
+                }.toList
+              }
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### User code
+
+            ```scala
+            val futureService = new HappyFutureService(initialData)
+            import futureService._
+
+            val futureSearch = for {
+              sid <- openSession("david", "fpnortheast")
+              things <- searchThings(sid, "ble")
+              _ <- closeSession(sid)
+            } yield things
+
+            futureSearch onComplete {
+              case Success(things) =>
+                things shouldBe List(Thing("indispensible"), Thing("irreplaceable"))
+              case Failure(exc) =>
+                fail(s"Couldn't search things due to $exc")
+            }
+            ```
+            Nearly identical to the previous code - we simply replaced a `match` on the result with the function `onComplete`.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### More problems
+            Our cleanup actions might never run if our service fails in the middle:
+
+            ```scala
+            val futureSession = openSession("david", "fpnortheast")
+
+            val futureSearch = for {
+              sid <- futureSession
+              things <- searchThings(sid, "ble")
+            } yield things
+
+            futureSearch onComplete {
+              case _ => closeSession(sid)
+            }
+
+            futureSearch onComplete {
+              case Success(things) =>
+                things shouldBe List(Thing("indispensible"), Thing("irreplaceable"))
+              case Failure(exc) => fail(s"Couldn't search things due to $exc")
+            }
+            ```
+            The solution is not so nice, but generally this is an acceptable compromise.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Type classes and ad-hoc polymorphism
+
+            This will be familiar to Haskell users:
+
+            `F[_]: Monad` === if there is some type `F[_]` which has a `Monad[F]` instance
+
+            This constraint allows us to express the idea of a type that participates in
+            certain behaviours without using subtyping.
+
+            We can extend the set of types which participate in a set of behaviours
+            without access to the original code - this is ad-hoc polumorphism.
+
+            I won't go into the mechanics as they are in Scala because they're not much fun.
+
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### We don't have to compromise
+
+            Surely we can express the idea of acquiring and releasing resources in a way that allows asynchronous acquisition and release?
+
+            ```scala
+            trait Functor[F[_]] {
+              def map[A, B](fa: F[A])(f: A => B): F[B]
+            }
+
+            trait Monad[F[_]] extends Functor[F] {
+              def pure[A](a: A): F[A]
+              def flatMap[A, B](fa: F[A])(f: A => F[B]): F[B]
+            }
+
+            abstract class Resource[F[_]: Monad, Source, Handle] {
+              def using[A](s: Source, session: Handle => F[A]): F[A]
+            }
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Session
+
+            If we can do that, surely we can lift any monadic type into a generalised `Session`?
+
+            ```scala
+            final case class Session[F[_], Source, Handle, A](
+              session: Handle => F[A]
+            )(implicit M: Monad[F], R: Resource[F, Source, Handle]) {
+
+              def map[B](f: A => B): Session[F, Source, Handle, B] =
+                Session(h => session(h) map f)
+
+              def flatMap[B](f: A => Session[F, Source, Handle, B]): Session[F, Source, Handle, B] =
+                Session(h => session(h) flatMap { f(_).session(h) })
+
+              def run(s: Source) = R.using(s, session)
+            }
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### A Session API
+          ```scala
+          type ThingSession[A] = Session[Future, ThingService, Long, A]
+
+          def ThingSession[A](f: Long => Future[A])(implicit ec: ExecutionContext) =
+            Session[Future, ThingService, Long, A](f)
+
+          trait ThingService {
+            def openSession(username: String, password: String)(implicit ec: ExecutionContext): Future[Long]
+            def searchThings(searchTerm: String)(implicit ec: ExecutionContext): ThingSession[List[Thing]]
+            def getAThing(thingId: String)(implicit ec: ExecutionContext): ThingSession[Thing]
+            def saveAThing(thing: Thing)(implicit ec: ExecutionContext): ThingSession[Unit]
+            def closeSession(sessionId: Long)(implicit ec: ExecutionContext): Future[Unit]
+          }
+          ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### Implementations
+          ```scala
+          def openSession(username: String, password: String)(implicit ec: ExecutionContext) =
+            Future {
+              val newSession = System.nanoTime
+              sessions += newSession
+              newSession
+            }
+
+          def searchThings(searchTerm: String)(implicit ec: ExecutionContext) = ThingSession { sid =>
+            Future {
+              database.filter { thing =>
+                thing.id.toUpperCase.contains(searchTerm.toUpperCase)
+              }.toList
+            }
+          }
+          ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### User code
+          ```scala
+          val thingService = new HappyThingService(initialData)
+          import thingService._
+
+          thingService.run(searchThings("ble")) onComplete {
+            case Success(things) =>
+              things shouldBe List(Thing("indispensible"), Thing("irreplaceable"))
+            case Failure(exc) =>
+              fail(s"Couldn't search things due to $exc")
+          }
+          ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### Separate definition and evaluation
+          ```scala
+          val newThingId = "necessary"
+
+          val thingSave = for {
+            _ <- saveAThing(Thing(newThingId))
+            things <- searchThings(newThingId)
+          } yield things
+
+          thingService.run(thingSave) onComplete {
+            case Success(things) => things shouldBe List(Thing("necessary"))
+            case Failure(exc) => fail(s"Couldn't save a thing due to $exc")
+          }
+          ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### Limitations
+
+          In Scala, `Session` is not particularly stack-safe, but this should not be
+          a problem unless we're writing for comprehensions hundreds of lines long
+          or folding large collections into `Session`.
+
+          We could avert this by using a type that is trampolined like Scalaz' `Task`.
+
+          Alternatively, we could write a trampolined `Session` ourselves - I'll leave this as an
+          exercise for the reader.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Conclusion
+            By abstracting over concepts like callbacks and composition of effects,
+            we can write code which is more predictable, can be composed together
+            more easily and which better describes the results we can expect.
+
+            We pay a price for this in conceptual difficulty and performance, but
+            in service-oriented architectures the execution time of our code is
+            typically dwarfed by IO.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### Questions?
+          </script>
+        </section>
+
+      </div>
+    </div>
+
+    <script src="lib/js/head.min.js"></script>
+    <script src="js/reveal.js"></script>
+
+    <script>
+
+      // Full list of configuration options available at:
+      // https://github.com/hakimel/reveal.js#configuration
+      Reveal.initialize({
+        width: 1366,
+        controls: false,
+        progress: true,
+        history: true,
+        center: true,
+
+        transition: 'slide', // none/fade/slide/convex/concave/zoom
+
+        // Optional reveal.js plugins
+        dependencies: [
+          { src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+          { src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+          { src: 'plugin/zoom-js/zoom.js', async: true },
+          { src: 'plugin/notes/notes.js', async: true }
+        ]
+      });
+
+    </script>
+
+  </body>
+</html>
