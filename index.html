@@ -624,13 +624,13 @@
 
             This will be familiar to Haskell users:
 
-            `F[_]: Monad` === if there is some type `F[_]` which has a `Monad[F]` instance
+            `F[_]: Monad` requires that there is some type `F[_]` which has a `Monad[F]` instance
 
             This constraint allows us to express the idea of a type that participates in
             certain behaviours without using subtyping.
 
-            We can extend the set of types which participate in a set of behaviours
-            without access to the original code - this is ad-hoc polumorphism.
+            We can extend the set of types which participate in this set of behaviours
+            without access to the original code - this is ad-hoc polymorphism.
 
             I won't go into the mechanics as they are in Scala because they're not much fun.
 
@@ -783,9 +783,10 @@
             we can write code which is more predictable, can be composed together
             more easily and which better describes the results we can expect.
 
-            We pay a price for this in conceptual difficulty and performance, but
-            in service-oriented architectures the execution time of our code is
-            typically dwarfed by IO.
+            We pay a price for this in conceptual difficulty and performance.
+
+            On the second point: in service-oriented architectures the execution time
+            of our code is typically dwarfed by IO.
           </script>
         </section>
 

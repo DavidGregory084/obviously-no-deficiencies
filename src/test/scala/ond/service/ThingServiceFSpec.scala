@@ -9,7 +9,7 @@ import scala.util.{ Try, Success, Failure }
 
 import scala.concurrent.ExecutionContext.Implicits.global
 
-class ThingServiceSpec extends FlatSpec with Matchers {
+class ThingServiceFSpec extends FlatSpec with Matchers {
   val initialData = List(
     Thing("important"),
     Thing("essential"),
@@ -18,7 +18,7 @@ class ThingServiceSpec extends FlatSpec with Matchers {
   )
 
   "ThingService" should "search things" in {
-    val thingService = new HappyThingService(initialData)
+    val thingService = new HappyThingServiceF(initialData)
     import thingService._
 
     thingService.run(searchThings("ble")) onComplete {
@@ -30,7 +30,7 @@ class ThingServiceSpec extends FlatSpec with Matchers {
   }
 
   it should "get a specific thing" in {
-    val thingService = new HappyThingService(initialData)
+    val thingService = new HappyThingServiceF(initialData)
     import thingService._
 
     thingService.run(getAThing("essential")) onComplete {
@@ -40,7 +40,7 @@ class ThingServiceSpec extends FlatSpec with Matchers {
   }
 
   it should "save a thing" in {
-    val thingService = new HappyThingService(initialData)
+    val thingService = new HappyThingServiceF(initialData)
     val newThingId = "necessary"
     import thingService._
 
@@ -56,7 +56,7 @@ class ThingServiceSpec extends FlatSpec with Matchers {
   }
 
   it should "unfortunately not be stack safe :(" in {
-    val list = (0 until 100000).toList
+    val list = (0 to 100000).toList
     type Id[A] = A
 
     implicit val idMonad: Monad[Id] = new Monad[Id] {
@@ -65,8 +65,8 @@ class ThingServiceSpec extends FlatSpec with Matchers {
       def flatMap[A, B](a: A)(f: A => B): B = f(a)
     }
 
-    type TestSession[A] = Session[Id, Unit, Unit, A]
-    def TestSession[A](f: Unit => A) =
+    type TestSessionF[A] = SessionF[Id, Unit, Unit, A]
+    def TestSessionF[A](f: Unit => A) =
       Session[Id, Unit, Unit, A](f)
 
     implicit def idResource: Resource[Id, Unit, Unit] =
@@ -78,10 +78,10 @@ class ThingServiceSpec extends FlatSpec with Matchers {
       }
 
     val notSafe = list.foldLeft(
-      TestSession(h => List.empty[Thing])
+      TestSessionF(h => List.empty[Thing])
     )((session, next) => for {
         listThing <- session
-        thing <- TestSession(h => Thing(h.toString))
+        thing <- TestSessionF(h => Thing(h.toString))
       } yield thing :: listThing)
 
     intercept[StackOverflowError] {

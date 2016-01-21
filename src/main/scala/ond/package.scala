@@ -36,11 +36,16 @@ object `package` {
 
   implicit class ResourceOps[F[_]: Monad, A](a: A) {
     def run[AA >: A, B, C](s: Session[F, AA, B, C])(implicit R: Resource[F, AA, B]): F[C] = s.run(a)
+    def run[AA >: A, B, C](s: SessionF[F, AA, B, C])(implicit R: Resource[F, AA, B]): F[C] = s.run(a)
   }
 
   type ThingSession[A] = Session[Future, ThingService, Long, A]
   def ThingSession[A](f: Long => Future[A])(implicit ec: ExecutionContext) =
     Session[Future, ThingService, Long, A](f)
+
+  type ThingSessionF[A] = SessionF[Future, ThingServiceF, Long, A]
+  def ThingSessionF[A](f: Long => Future[A])(implicit ec: ExecutionContext) =
+    SessionF[Future, ThingServiceF, Long, A](f)
 
   implicit def thingServiceResource(implicit ec: ExecutionContext): Resource[Future, ThingService, Long] =
     new Resource[Future, ThingService, Long] {
@@ -54,4 +59,15 @@ object `package` {
       }
     }
 
+  implicit def thingServiceFResource(implicit ec: ExecutionContext): Resource[Future, ThingServiceF, Long] =
+    new Resource[Future, ThingServiceF, Long] {
+      type Source = ThingServiceF
+
+      def using[A](s: Source, session: Long => Future[A]): Future[A] = {
+        val getHandle = s.openSession("david", "fpnortheast")
+        val runSession = getHandle flatMap session
+        runSession onComplete { case _ => getHandle flatMap s.closeSession }
+        runSession
+      }
+    }
 }
