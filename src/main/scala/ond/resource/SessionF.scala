@@ -4,22 +4,23 @@ package resource
 import scala.language.higherKinds
 
 /**
- * A WIP attempt at a slightly less stack-hungry version of Session; it's still not stack-safe
+ * A stack-safe version of Session
  */
 sealed abstract class SessionF[F[_], Source, Handle, A](implicit M: Monad[F], R: Resource[F, Source, Handle]) {
   import SessionF._
 
   /** Interpreter for `SessionF` terms which recursively evaluates the computation */
+  @annotation.tailrec
   protected def loop(h: Handle): F[A] =
     this match {
       case Return(a) => M.pure(a)
-      case Ask(continue) => continue(h)
+      case Ask(continue) => M.pure(continue(h))
       case bind: Bind[F, Source, Handle, A, _] =>
         bind.session match {
           case Return(a) =>
             bind.fn(a).loop(h)
           case ask @ Ask(continue) =>
-            continue(h).map(bind.fn).flatMap(_.loop(h))
+            bind.fn(continue(h)).loop(h)
           case Bind(session, g) =>
             session.flatMap(c => g(c).flatMap(bind.fn)).loop(h)
         }
@@ -43,7 +44,7 @@ object SessionF {
   /** Term to encode returning a pure value of type `A` inside the computation. */
   private[ond] final case class Return[F[_]: Monad, Source, Handle, A](value: A)(implicit R: Resource[F, Source, Handle]) extends SessionF[F, Source, Handle, A]
   /** Term to encode a continuation which requires the session's `Handle` */
-  private[ond] final case class Ask[F[_]: Monad, Source, Handle, A](continue: Handle => F[A])(implicit R: Resource[F, Source, Handle]) extends SessionF[F, Source, Handle, A]
+  private[ond] final case class Ask[F[_]: Monad, Source, Handle, A](continue: Handle => A)(implicit R: Resource[F, Source, Handle]) extends SessionF[F, Source, Handle, A]
   /**
    * Term to encode `flatMap` operations as a nested data structure so that
    *  they can be re-associated to the right by the interpreter
@@ -52,8 +53,8 @@ object SessionF {
 
   /**
    * The `SessionF` constructor lifts a function which requires an
-   *  open session `Handle` to return an `F[A]` into the computation
+   *  open session `Handle` to return an `A` into the computation
    */
-  def apply[F[_]: Monad, Source, Handle, A](op: Handle => F[A])(implicit R: Resource[F, Source, Handle]): SessionF[F, Source, Handle, A] =
+  def apply[F[_]: Monad, Source, Handle, A](op: Handle => A)(implicit R: Resource[F, Source, Handle]): SessionF[F, Source, Handle, A] =
     Ask(op)
 }

@@ -620,40 +620,13 @@
 
         <section data-markdown>
           <script type="text/template">
-            ### Type classes and ad-hoc polymorphism
-
-            This will be familiar to Haskell users:
-
-            `F[_]: Monad` requires that there is some type `F[_]` which has a `Monad[F]` instance
-
-            This constraint allows us to express the idea of a type that participates in
-            certain behaviours without using subtyping.
-
-            We can extend the set of types which participate in this set of behaviours
-            without access to the original code - this is ad-hoc polymorphism.
-
-            I won't go into the mechanics as they are in Scala because they're not much fun.
-
-          </script>
-        </section>
-
-        <section data-markdown>
-          <script type="text/template">
           ### We don't have to compromise
 
-            Surely we can express the idea of acquiring and releasing resources in a way that allows asynchronous acquisition and release?
+          Surely we can express the idea of acquiring and releasing resources in a way that allows
+          for asynchronous acquisition and release?
 
             ```scala
-            trait Functor[F[_]] {
-              def map[A, B](fa: F[A])(f: A => B): F[B]
-            }
-
-            trait Monad[F[_]] extends Functor[F] {
-              def pure[A](a: A): F[A]
-              def flatMap[A, B](fa: F[A])(f: A => F[B]): F[B]
-            }
-
-            abstract class Resource[F[_]: Monad, Source, Handle] {
+            abstract class Resource[F[_], Source, Handle] {
               def using[A](s: Source, session: Handle => F[A]): F[A]
             }
             ```
@@ -662,22 +635,64 @@
 
         <section data-markdown>
           <script type="text/template">
-            ### Session
+          ### Session
 
-            If we can do that, surely we can lift any monadic type into a generalised `Session`?
+          If we can do that, surely we can lift any monadic type into a generalised `Session`?
 
+          It seems so, but what do those `implicit` parameters mean, and how are they
+          defined?
+          ```scala
+          final case class Session[F[_], Source, Handle, A](
+            session: Handle => A
+          )(implicit M: Monad[F], R: Resource[F, Source, Handle]) {
+
+            def map[B](f: A => B): Session[F, Source, Handle, B] =
+              Session(h => f(session(h)))
+
+            def flatMap[B](f: A => Session[F, Source, Handle, B]): Session[F, Source, Handle, B] =
+              Session(h => f(session(h)).session(h) })
+
+            def run(s: Source) = R.using(s, session andThen M.pure)
+          }
+          ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Type classes and ad-hoc polymorphism
+
+            `implicit M: Monad[F]`
+
+            Used as a method or constructor parameter, this requires that the type `F[_]`
+            has a `Monad[F]` instance in scope and gives us access to that instance as `M`.
+
+            This constraint allows us to express the idea of a type that participates in
+            certain behaviours without using subtyping.
+
+            We can extend the set of types which participate in these behaviours
+            without access to the original code - this is ad-hoc polymorphism.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Implementing a `Monad` instance
+            We're already using one of Scala's (loosely) monadic types.
+
+            Here we supply to Scala's implicit scope a definition of `Monad` which simply calls
+            through to the corresponding methods on `Future`.
             ```scala
-            final case class Session[F[_], Source, Handle, A](
-              session: Handle => F[A]
-            )(implicit M: Monad[F], R: Resource[F, Source, Handle]) {
+            trait Monad[F[_]] {
+              def pure[A](a: A): F[A]
+              def map[A, B](fa: F[A])(f: A => B): F[B]
+              def flatMap[A, B](fa: F[A])(f: A => F[B]): F[B]
+            }
 
-              def map[B](f: A => B): Session[F, Source, Handle, B] =
-                Session(h => session(h) map f)
-
-              def flatMap[B](f: A => Session[F, Source, Handle, B]): Session[F, Source, Handle, B] =
-                Session(h => session(h) flatMap { f(_).session(h) })
-
-              def run(s: Source) = R.using(s, session)
+            implicit def futureMonad(implicit ec: ExecutionContext): Monad[Future] = new Monad[Future] {
+              def pure[A](a: A) = Future(a)
+              def map[A, B](fa: Future[A])(f: A => B): Future[B] = fa map f
+              def flatMap[A, B](fa: Future[A])(f: A => Future[B]): Future[B] = fa flatMap f
             }
             ```
           </script>
@@ -685,11 +700,41 @@
 
         <section data-markdown>
           <script type="text/template">
+            ### Implementing a `Resource` instance
+            Using ad-hoc polymorphism we can wrap up our resource acquisition
+            and cleanup code into a type which runs the session using our 
+            service and tidies up afterwards.
+
+            ```scala
+            implicit def thingServiceResource(implicit ec: ExecutionContext) =
+              new Resource[Future, ThingService, Long] {
+                def using[A](s: ThingService, session: Long => Future[A]): Future[A] = {
+                  val getHandle = s.openSession("david", "fpnortheast")
+                  val runSession = getHandle flatMap session
+                  runSession onComplete { case _ => getHandle flatMap s.closeSession }
+                  runSession
+                }
+              }
+            ```
+          </script>
+        </section>
+
+
+        <section data-markdown>
+          <script type="text/template">
           ### A Session API
+
+          Looking back at our constraint:
+
+          `implicit M: Monad[F], R: Resource[F, Source, Handle]`
+
+          we see that we have now satisfied both of the requirements to construct
+          a `Session` for `Future`.
+
           ```scala
           type ThingSession[A] = Session[Future, ThingService, Long, A]
 
-          def ThingSession[A](f: Long => Future[A])(implicit ec: ExecutionContext) =
+          def ThingSession[A](f: Long => A)(implicit ec: ExecutionContext) =
             Session[Future, ThingService, Long, A](f)
 
           trait ThingService {
@@ -715,11 +760,9 @@
             }
 
           def searchThings(searchTerm: String)(implicit ec: ExecutionContext) = ThingSession { sid =>
-            Future {
-              database.filter { thing =>
-                thing.id.toUpperCase.contains(searchTerm.toUpperCase)
-              }.toList
-            }
+            database.filter { thing =>
+              thing.id.toUpperCase.contains(searchTerm.toUpperCase)
+            }.toList
           }
           ```
           </script>
@@ -771,22 +814,118 @@
 
           We could avert this by using a type that is trampolined like Scalaz' `Task`.
 
-          Alternatively, we could write a trampolined `Session` ourselves - I'll leave this as an
-          exercise for the reader.
+          Alternatively, we could write a trampolined `Session` ourselves.
           </script>
         </section>
 
         <section data-markdown>
           <script type="text/template">
-            ### Conclusion
+          ### `SessionF` vocabulary
+          ```scala
+          object SessionF {
+            // Return a value `A` from a `SessionF`
+            case class Return[F[_]: Monad, Source, Handle, A](
+              value: A
+            )(implicit R: Resource[F, Source, Handle]) extends SessionF[F, Source, Handle, A]
+
+            // Return a value `A` when the session handle `Handle` is required to produce it
+            case class Ask[F[_]: Monad, Source, Handle, A](
+              continue: Handle => A
+            )(implicit R: Resource[F, Source, Handle]) extends SessionF[F, Source, Handle, A]
+
+            // Continue one `SessionF` with another `SessionF`
+            case class Bind[F[_]: Monad, Source, Handle, A, B](
+              session: SessionF[F, Source, Handle, B], fn: B => SessionF[F, Source, Handle, A]
+            )(implicit R: Resource[F, Source, Handle]) extends SessionF[F, Source, Handle, A]
+          }
+          ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### Formulating `SessionF`
+          Defining `SessionF` is simply a case of writing the methods we
+          require in terms of our vocabulary. We also require a tail-recursive 
+          evaluator `loop`, which we supply to our `Resource` to run the `SessionF`.
+          ```scala
+          sealed abstract class SessionF[F[_], Source, Handle, A](
+            implicit M: Monad[F], R: Resource[F, Source, Handle]
+          ) {
+            protected def loop(h: Handle): F[A] = ???
+            def run(s: Source): F[A] =
+              R.using(s, loop)
+            def map[B](f: A => B): SessionF[F, Source, Handle, B] = 
+              flatMap(a => Return(f(a)))
+            def flatMap[B](f: A => SessionF[F, Source, Handle, B]): SessionF[F, Source, Handle, B] =
+              Bind(this, f)
+          }
+          object SessionF {
+            def apply[F[_]: Monad, Source, Handle, A](
+              op: Handle => A
+            )(implicit R: Resource[F, Source, Handle]): SessionF[F, Source, Handle, A] = Ask(op)
+          }
+          ```
+          </script>
+        </section>
+
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Evaluating `SessionF`
+            Here we recursively evaluate `SessionF`, matching on the vocabulary
+            we defined previously. This allows us to continue the session appropriately
+            depending upon the type of the current term.
+            ```scala
+            @annotation.tailrec
+            protected def loop(h: Handle): F[A] =
+              this match {
+                case Return(a) => M.pure(a)
+                case Ask(continue) => M.pure(continue(h))
+                case bind: Bind[F, Source, Handle, A, _] =>
+                  bind.session match {
+                    case Return(a) =>
+                      bind.fn(a).loop(h)
+                    case Ask(continue) =>
+                      bind.fn(continue(h)).loop(h)
+                    case Bind(session, g) =>
+                      session.flatMap(c => g(c).flatMap(bind.fn)).loop(h)
+                  }
+              }
+            ```
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+            ### Conclusions
             By abstracting over concepts like callbacks and composition of effects,
             we can write code which is more predictable, can be composed together
             more easily and which better describes the results we can expect.
 
             We pay a price for this in conceptual difficulty and performance.
+          </script>
+        </section>
 
-            On the second point: in service-oriented architectures the execution time
-            of our code is typically dwarfed by IO.
+        <section data-markdown>
+          <script type="text/template">
+          ### Offsetting the costs
+
+          It's my belief that the price of functional programming in conceptual
+          difficulty is offset by the predictability of functional code.
+
+          In terms of performance, in service-oriented architectures the execution time
+          of our code is typically dwarfed by IO, leaving us free to accept small 
+          performance penalties.
+          </script>
+        </section>
+
+        <section data-markdown>
+          <script type="text/template">
+          ### Your experience or use case may differ
+
+          As with any tool, your mileage may vary!
+
           </script>
         </section>
 

@@ -26,27 +26,21 @@ class HappyThingServiceF(initialState: List[Thing]) extends ThingServiceF with S
     }
 
   def searchThings(searchTerm: String)(implicit ec: ExecutionContext) = ThingSessionF { sid =>
-    Future {
-      logger.debug(s"Searching for items with id containing $searchTerm")
-      database.filter { thing =>
-        thing.id.toUpperCase.contains(searchTerm.toUpperCase)
-      }.toList
-    }
+    logger.debug(s"Searching for items with id containing $searchTerm")
+    database.filter { thing =>
+      thing.id.toUpperCase.contains(searchTerm.toUpperCase)
+    }.toList
   }
 
   def getAThing(thingId: String)(implicit ec: ExecutionContext) = ThingSessionF { sid =>
-    Future {
-      logger.debug(s"Retrieving item with id $thingId")
-      database.filter { _.id == thingId }.head
-    }
+    logger.debug(s"Retrieving item with id $thingId")
+    database.filter { _.id == thingId }.head
   }
 
   def saveAThing(thing: Thing)(implicit ec: ExecutionContext) = ThingSessionF { sid =>
-    Future {
-      logger.debug(s"Saving item $thing")
-      if (database.exists(_.id == thing.id)) ()
-      else { database += thing; () }
-    }
+    logger.debug(s"Saving item $thing")
+    if (database.exists(_.id == thing.id)) ()
+    else { database += thing; () }
   }
 
   def closeSession(sessionId: Long)(implicit ec: ExecutionContext) =

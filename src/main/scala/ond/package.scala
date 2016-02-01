@@ -7,20 +7,9 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.language.higherKinds
 
 object `package` {
-  trait Functor[F[_]] {
-    def map[A, B](fa: F[A])(f: A => B): F[B]
-  }
-
-  implicit def futureFunctor(implicit ec: ExecutionContext): Functor[Future] = new Functor[Future] {
-    def map[A, B](fa: Future[A])(f: A => B): Future[B] = fa map f
-  }
-
-  implicit class FunctorOps[F[_], A](fa: F[A])(implicit F: Functor[F]) {
-    def map[B](f: A => B): F[B] = F.map(fa)(f)
-  }
-
-  trait Monad[F[_]] extends Functor[F] {
+  trait Monad[F[_]] {
     def pure[A](a: A): F[A]
+    def map[A, B](fa: F[A])(f: A => B): F[B]
     def flatMap[A, B](fa: F[A])(f: A => F[B]): F[B]
   }
 
@@ -31,6 +20,7 @@ object `package` {
   }
 
   implicit class MonadOps[F[_], A](fa: F[A])(implicit M: Monad[F]) {
+    def map[B](f: A => B): F[B] = M.map(fa)(f)
     def flatMap[B](f: A => F[B]): F[B] = M.flatMap(fa)(f)
   }
 
@@ -40,18 +30,16 @@ object `package` {
   }
 
   type ThingSession[A] = Session[Future, ThingService, Long, A]
-  def ThingSession[A](f: Long => Future[A])(implicit ec: ExecutionContext) =
+  def ThingSession[A](f: Long => A)(implicit ec: ExecutionContext) =
     Session[Future, ThingService, Long, A](f)
 
   type ThingSessionF[A] = SessionF[Future, ThingServiceF, Long, A]
-  def ThingSessionF[A](f: Long => Future[A])(implicit ec: ExecutionContext) =
+  def ThingSessionF[A](f: Long => A)(implicit ec: ExecutionContext) =
     SessionF[Future, ThingServiceF, Long, A](f)
 
   implicit def thingServiceResource(implicit ec: ExecutionContext): Resource[Future, ThingService, Long] =
     new Resource[Future, ThingService, Long] {
-      type Source = ThingService
-
-      def using[A](s: Source, session: Long => Future[A]): Future[A] = {
+      def using[A](s: ThingService, session: Long => Future[A]): Future[A] = {
         val getHandle = s.openSession("david", "fpnortheast")
         val runSession = getHandle flatMap session
         runSession onComplete { case _ => getHandle flatMap s.closeSession }
@@ -61,9 +49,7 @@ object `package` {
 
   implicit def thingServiceFResource(implicit ec: ExecutionContext): Resource[Future, ThingServiceF, Long] =
     new Resource[Future, ThingServiceF, Long] {
-      type Source = ThingServiceF
-
-      def using[A](s: Source, session: Long => Future[A]): Future[A] = {
+      def using[A](s: ThingServiceF, session: Long => Future[A]): Future[A] = {
         val getHandle = s.openSession("david", "fpnortheast")
         val runSession = getHandle flatMap session
         runSession onComplete { case _ => getHandle flatMap s.closeSession }

@@ -17,7 +17,7 @@ class ThingServiceFSpec extends FlatSpec with Matchers {
     Thing("irreplaceable")
   )
 
-  "ThingService" should "search things" in {
+  "ThingServiceF" should "search things" in {
     val thingService = new HappyThingServiceF(initialData)
     import thingService._
 
@@ -55,8 +55,8 @@ class ThingServiceFSpec extends FlatSpec with Matchers {
     }
   }
 
-  it should "unfortunately not be stack safe :(" in {
-    val list = (0 to 100000).toList
+  it should "be stack safe :)" in {
+    val list = (0 until 100000).toList
     type Id[A] = A
 
     implicit val idMonad: Monad[Id] = new Monad[Id] {
@@ -67,7 +67,7 @@ class ThingServiceFSpec extends FlatSpec with Matchers {
 
     type TestSessionF[A] = SessionF[Id, Unit, Unit, A]
     def TestSessionF[A](f: Unit => A) =
-      Session[Id, Unit, Unit, A](f)
+      SessionF[Id, Unit, Unit, A](f)
 
     implicit def idResource: Resource[Id, Unit, Unit] =
       new Resource[Id, Unit, Unit] {
@@ -77,16 +77,14 @@ class ThingServiceFSpec extends FlatSpec with Matchers {
           session(())
       }
 
-    val notSafe = list.foldLeft(
+    val safe = list.foldLeft(
       TestSessionF(h => List.empty[Thing])
     )((session, next) => for {
         listThing <- session
-        thing <- TestSessionF(h => Thing(h.toString))
+        thing <- TestSessionF(h => Thing(next.toString))
       } yield thing :: listThing)
 
-    intercept[StackOverflowError] {
-      notSafe.run(())
-    }
+    safe.run(()).length shouldBe 100000
   }
 
 }

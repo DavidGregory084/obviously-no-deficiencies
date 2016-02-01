@@ -81,7 +81,7 @@ class ThingServiceSpec extends FlatSpec with Matchers {
       TestSession(h => List.empty[Thing])
     )((session, next) => for {
         listThing <- session
-        thing <- TestSession(h => Thing(h.toString))
+        thing <- TestSession(h => Thing(next.toString))
       } yield thing :: listThing)
 
     intercept[StackOverflowError] {

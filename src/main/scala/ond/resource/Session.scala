@@ -3,13 +3,13 @@ package resource
 
 import scala.language.higherKinds
 
-final case class Session[F[_], Source, Handle, A](session: Handle => F[A])(implicit M: Monad[F], R: Resource[F, Source, Handle]) {
+final case class Session[F[_], Source, Handle, A](session: Handle => A)(implicit M: Monad[F], R: Resource[F, Source, Handle]) {
   def map[B](f: A => B): Session[F, Source, Handle, B] =
-    Session(h => session(h) map f)
+    Session(h => f(session(h)))
 
   def flatMap[B](f: A => Session[F, Source, Handle, B]): Session[F, Source, Handle, B] =
-    Session(h => session(h) flatMap { f(_).session(h) })
+    Session(h => f(session(h)).session(h))
 
-  def run(s: Source) = R.using(s, session)
+  def run(s: Source) = R.using(s, session andThen M.pure)
 }
 
